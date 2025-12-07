@@ -4,6 +4,9 @@ import { HardhatRuntimeEnvironment } from "hardhat/types";
 
 import { ADDRESS_ONE } from "../helpers/utils";
 
+// Our deployed ACM address on bsctestnet
+const OUR_ACM_ADDRESS = "0x32C58b4Ed4dfB03e7D09C5D50D417639BE63cc0E";
+
 const func: DeployFunction = async (hre: HardhatRuntimeEnvironment) => {
   const {
     network: { live },
@@ -24,8 +27,19 @@ const func: DeployFunction = async (hre: HardhatRuntimeEnvironment) => {
   }
 
   const WBNBAddress = (await ethers.getContractOrNull("WBNB"))?.address || ADDRESS_ONE;
-  const timelockAddress = (await ethers.getContract("NormalTimelock")).address;
-  const acmAddress = (await ethers.getContract("AccessControlManager")).address;
+
+  // For our fork: use deployer as owner instead of timelock
+  const ownerAddress = deployer;
+
+  // Use our deployed ACM, or fallback to deployed one
+  let acmAddress: string;
+  try {
+    acmAddress = (await ethers.getContract("AccessControlManager")).address;
+  } catch (e) {
+    console.log("AccessControlManager not found in deployments, using hardcoded address");
+    acmAddress = OUR_ACM_ADDRESS;
+  }
+
   const loopsLimit = 20;
 
   const defaultProxyAdmin = await hre.artifacts.readArtifact(
@@ -39,7 +53,7 @@ const func: DeployFunction = async (hre: HardhatRuntimeEnvironment) => {
     args: [comptrollerAddress, WBNBAddress, vBNBAddress],
     proxy: live
       ? {
-          owner: timelockAddress,
+          owner: ownerAddress,
           proxyContract: "OpenZeppelinTransparentProxy",
           execute: {
             methodName: "initialize",
@@ -60,13 +74,8 @@ const func: DeployFunction = async (hre: HardhatRuntimeEnvironment) => {
         },
   });
 
-  const psr = await hre.ethers.getContract("ProtocolShareReserve");
-
-  if (live) {
-    const tx = await psr.transferOwnership(timelockAddress);
-    await tx.wait();
-    console.log("Transferred ownership of PSR to Timelock");
-  }
+  // Skip ownership transfer since we use deployer as owner
+  console.log("ProtocolShareReserve deployed with deployer as owner");
 };
 
 func.tags = ["ProtocolShareReserve"];
